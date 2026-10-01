@@ -4,18 +4,24 @@
   "description": "POS system REST API (Express + MySQL)",
   "main": "server.js",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
     "migrate": "node scripts/migrate.js",
     "migrate:status": "node scripts/migrate.js --status",
+    "db:verify": "node scripts/verify-schema.js",
+    "db:up": "docker compose -f compose.database.yaml up -d --wait",
+    "db:down": "docker compose -f compose.database.yaml down",
+    "test:db": "node --test tests/integration/schema.test.cjs",
+    "test:backend": "node --test tests/integration/backend.test.cjs",
     "create-admin": "node scripts/create-admin.js",
-    "seed:permissions": "node src/seed/seedPermission.js",
-    "seed:admin": "node src/seed/seedAdmin.js",
+    "seed:permissions": "node database/seeds/seed-permissions.js",
+    "seed:admin": "node database/seeds/seed-admin.js",
     "check": "node scripts/check-env.js",
-    "test": "node --test"
+    "check:code": "node scripts/check-code.js",
+    "test": "node --test tests/unit/*.test.js"
   },
   "keywords": [],
   "author": "",

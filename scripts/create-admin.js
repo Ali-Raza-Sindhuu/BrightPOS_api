@@ -24,16 +24,16 @@ function arg(name, fallback = null) {
 }
 
 async function main() {
-  const username = arg("username", "admin");
-  const password = arg("password");
-  const email = arg("email");
+  const username = arg("username", process.env.ADMIN_USERNAME || "admin");
+  const password = arg("password", process.env.ADMIN_PASSWORD);
+  const email = arg("email", process.env.ADMIN_EMAIL || null);
   const fullName = arg("name", "Administrator");
 
   if (!password) {
     console.error("Usage: npm run create-admin -- --username admin --password <password> [--email a@b.com] [--name \"Full Name\"]");
     process.exit(1);
   }
-  if (password.length < 12) {
+  if (password.length < 12 || /replace-with/i.test(password)) {
     console.error("[create-admin] Use a unique password with at least 12 characters.");
     process.exit(1);
   }

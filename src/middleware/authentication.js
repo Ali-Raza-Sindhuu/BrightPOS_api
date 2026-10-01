@@ -1,7 +1,7 @@
-const { verifyToken } = require("../utils/jwt");
-const ApiError = require("../utils/ApiError");
-const asyncHandler = require("../utils/asyncHandler");
-const userModel = require("../modules/users/userModel");
+const { verifyToken, credentialVersion } = require("../utils/jwt");
+const ApiError = require("../utils/api-error");
+const asyncHandler = require("../utils/async-handler");
+const userModel = require("../modules/users/user.model");
 
 /**
  * Verifies the Bearer token, then re-checks is_active against the DB on
@@ -29,6 +29,10 @@ const authenticate = asyncHandler(async (req, res, next) => {
   }
   if (!user.is_active) {
     throw new ApiError(403, "This account has been deactivated");
+  }
+
+  if (decoded.credentialVersion !== credentialVersion(user.password_hash)) {
+    throw new ApiError(401, 'Credentials changed; log in again');
   }
 
   req.user = {

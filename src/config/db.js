@@ -1,15 +1,16 @@
 const mysql = require("mysql2/promise");
 const config = require("./env");
+const { getDatabaseOptions } = require('./database');
 
 const pool = mysql.createPool({
-  host: config.db.host,
-  port: config.db.port,
-  user: config.db.user,
-  password: config.db.password,
-  database: config.db.database,
+  ...getDatabaseOptions(),
   waitForConnections: true,
   connectionLimit: config.db.connectionLimit,
-  queueLimit: 0,
+  queueLimit: config.db.queueLimit,
+  maxIdle: config.db.connectionLimit,
+  idleTimeout: 30000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
   dateStrings: true,
 });
 

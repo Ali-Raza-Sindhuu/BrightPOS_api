@@ -6,43 +6,43 @@ const morgan = require("morgan");
 const config = require("./config/env");
 const pool = require("./config/db");
 
-const authRoutes = require("./modules/auth/authRoutes");
-const groupRoutes = require("./modules/groups/groupRoutes");
-const userRoutes = require("./modules/users/userRoutes");
-const accessControlRoutes = require("./modules/accessControl/accessControlRoutes");
-const { notFound, errorHandler } = require("./middleware/errorHandler");
+const authRoutes = require("./modules/auth/auth.routes");
+const groupRoutes = require("./modules/groups/group.routes");
+const userRoutes = require("./modules/users/user.routes");
+const accessControlRoutes = require("./modules/access-control/access-control.routes");
+const { notFound, errorHandler } = require("./middleware/error-handler");
 
-const categoryRoutes = require("./modules/categories/categoryRoutes");
-const subCategoryRoutes = require("./modules/subCategories/subCategoryRoutes");
-const itemTypeRoutes = require("./modules/itemTypes/itemTypeRoutes");
-const itemUnitRoutes = require("./modules/itemUnits/itemUnitsRoutes");
-const manufacturerRoutes = require("./modules/manufacturers/manufacturerRoutes");
-const shelveLocationRoutes = require("./modules/shelveLocations/shelveLocationRoutes");
-const supplierRoutes = require("./modules/suppliers/supplierRoutes");
-const itemRoutes = require("./modules/items/itemsRoutes");
-const purchaseRoutes = require("./modules/purchase/purchaseRoute");
-const goodsReceiptRoutes = require("./modules/goodsReceipt/goodsReceiptRoute");
-const customerRoutes = require('./modules/customers/customerRoutes');
-const saleRoutes = require('./modules/sales/saleRoutes');
-const customerPaymentRoutes = require('./modules/customerPayments/paymentRoutes');
-const saleReturnRoutes = require('./modules/saleReturns/returnRoutes');
-const supplierPaymentRoutes = require('./modules/supplierPayments/supplierPaymentRoutes');
-const purchaseReturnRoutes = require('./modules/purchaseReturns/returnRoutes');
-const businessUnitRoutes = require('./modules/businessUnits/businessUnitRoutes');
-const stockTransferRoute = require('./modules/stockTransfer/stockTransferRoute');
-const bookingRoutes = require('./modules/bookings/bookingRoute')
-const stockSnapshotRoutes = require('./modules/stockSnapshot/stockRoute');
-const openingStockRoute = require('./modules/openingStock/openingStockRoute');
-const bookingPaymentRoutes = require('./modules/bookingPayment/bookingPaymentRoute');
-const customerLedgerRoutes = require('./modules/customerLedger/customerLedgerRoute');
-const supplierLedgerRoutes = require('./modules/supplierLedger/supplierLedgerRoute');
-const reorderRoute = require('./modules/reorder/reorderRoute');
-const expenseVoucherRoute = require('./modules/expenseVoucher/expenseVoucherRoute');
-const expenseReportRoute = require('./modules/expenseReport/expenseReport');
-const expenseHeadRoute = require('./modules/expenseHead/expenseHead');
-const daybookRoute = require('./modules/dayBook/dayBookRoute');
-const dashboard = require('./modules/dashboard/dashboard');
-const expiryTagRoutes = require('./modules/expiry-tags/expiryTag.routes');
+const categoryRoutes = require("./modules/categories/category.routes");
+const subCategoryRoutes = require("./modules/sub-categories/sub-category.routes");
+const itemTypeRoutes = require("./modules/item-types/item-type.routes");
+const itemUnitRoutes = require("./modules/item-units/item-units.routes");
+const manufacturerRoutes = require("./modules/manufacturers/manufacturer.routes");
+const shelveLocationRoutes = require("./modules/shelve-locations/shelve-location.routes");
+const supplierRoutes = require("./modules/suppliers/supplier.routes");
+const itemRoutes = require("./modules/items/items.routes");
+const purchaseRoutes = require("./modules/purchases/purchase.routes");
+const goodsReceiptRoutes = require("./modules/goods-receipts/goods-receipt.routes");
+const customerRoutes = require('./modules/customers/customer.routes');
+const saleRoutes = require('./modules/sales/sale.routes');
+const customerPaymentRoutes = require('./modules/customer-payments/customer-payment.routes');
+const saleReturnRoutes = require('./modules/sale-returns/sale-return.routes');
+const supplierPaymentRoutes = require('./modules/supplier-payments/supplier-payment.routes');
+const purchaseReturnRoutes = require('./modules/purchase-returns/purchase-return.routes');
+const businessUnitRoutes = require('./modules/business-units/business-unit.routes');
+const stockTransferRoute = require('./modules/stock-transfers/stock-transfer.routes');
+const bookingRoutes = require('./modules/bookings/booking.routes')
+const stockSnapshotRoutes = require('./modules/stock-snapshots/stock-snapshot.routes');
+const openingStockRoute = require('./modules/opening-stock/opening-stock.routes');
+const bookingPaymentRoutes = require('./modules/booking-payments/booking-payment.routes');
+const customerLedgerRoutes = require('./modules/customer-ledger/customer-ledger.routes');
+const supplierLedgerRoutes = require('./modules/supplier-ledger/supplier-ledger.routes');
+const reorderRoute = require('./modules/reorders/reorder.routes');
+const expenseVoucherRoute = require('./modules/expense-vouchers/expense-voucher.routes');
+const expenseReportRoute = require('./modules/expense-reports/expense-report.routes');
+const expenseHeadRoute = require('./modules/expense-heads/expense-head.routes');
+const daybookRoute = require('./modules/daybook/day-book.routes');
+const dashboard = require('./modules/dashboard/dashboard.routes');
+const expiryTagRoutes = require('./modules/expiry-tags/expiry-tag.routes');
 
 const app = express();
 
@@ -76,6 +76,14 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
+
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+    if (req.body === undefined) req.body = {};
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) return next(new (require('./utils/api-error'))(400, 'Request body must be an object'));
+  }
+  next();
+});
 app.use("/api/auth", authRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/users", userRoutes);

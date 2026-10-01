@@ -1,6 +1,4 @@
-// Entry point. On cPanel set this file as the "Application startup file" in
-// Setup Node.js App — Passenger requires the app to listen on the port it
-// injects via process.env.PORT, which config/env.js picks up.
+// Local process entry. src/app.js exports the Express application separately.
 const config = require("./src/config/env");
 const app = require("./src/app");
 const pool = require("./src/config/db");
@@ -12,7 +10,9 @@ let server;
     // Verify MySQL before accepting traffic so a bad DB_* value surfaces as a
     // clear boot error in the cPanel log instead of a 500 on the first request.
     const connection = await pool.getConnection();
-    connection.release();
+    try {
+      await require('./scripts/lib/schema').validateSchema(connection, require('./scripts/lib/migrations').loadMigrations());
+    } finally { connection.release(); }
     console.log(`[db] Connected to MySQL database "${config.db.database}"`);
 
     server = app.listen(config.port, config.host, () => {
