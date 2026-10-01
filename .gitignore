@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Environment variables — never commit real secrets.
+# .env.example IS committed and is the template.
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build output
+dist/
+build/
+
+# User uploads — runtime data. Keep the folder structure in git (so a fresh
+# clone has somewhere to write) but never the uploaded files themselves.
+uploads/*
+!uploads/.gitkeep
+!uploads/items/
+uploads/items/*
+!uploads/items/.gitkeep
+
+# Deploy artifacts produced by scripts/package.sh
+deploy/
+*.zip
