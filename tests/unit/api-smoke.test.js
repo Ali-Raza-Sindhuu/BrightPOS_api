@@ -20,6 +20,16 @@ async function withServer(fn) {
   }
 }
 
+test('marketing inbox rejects anonymous reads and writes; public form rejects malformed consent', async () => {
+  await withServer(async baseUrl => {
+    assert.equal((await fetch(`${baseUrl}/api/marketing/submissions`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/marketing/submissions/1`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'closed' }) })).status, 401);
+    const response = await fetch(`${baseUrl}/api/marketing/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'newsletter', email: 'owner@example.com', consent: 'true' }) });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).message, 'Consent is required');
+  });
+});
+
 test('health endpoint reports an available database without exposing runtime config', async () => {
   const originalQuery = pool.query;
   pool.query = async () => [[{ ready: 1 }], []];

@@ -15,12 +15,12 @@ async function findAll({ limit, offset, search }) {
        c.*,
        COALESCE(si.total_sales, 0) AS total_sales,
        COALESCE(sr.total_returns, 0) AS total_sales_returns,
-       COALESCE(pay.total_paid, 0) AS total_paid,
+       (COALESCE(pay.total_paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id JOIN sale_invoices rf_invoice ON rf_invoice.id=rn.invoice_id WHERE rf_invoice.customer_id=c.id AND rp.status='completed'),0)) AS total_paid,
        (c.previous_balance + COALESCE((SELECT SUM(b.payable) FROM bookings b WHERE b.customer_id = c.id AND b.booking_status <> 'Rejected' AND NOT EXISTS (SELECT 1 FROM booking_invoice_links WHERE booking_id = b.id)),0)
          - COALESCE((SELECT SUM(bp.amount) FROM booking_payments bp WHERE bp.customer_id = c.id AND NOT EXISTS (SELECT 1 FROM booking_invoice_links WHERE booking_id = bp.booking_id)),0)
          + COALESCE(si.total_sales, 0)
          - COALESCE(sr.total_returns, 0)
-         - COALESCE(pay.total_paid, 0)
+         - (COALESCE(pay.total_paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id JOIN sale_invoices rf_invoice ON rf_invoice.id=rn.invoice_id WHERE rf_invoice.customer_id=c.id AND rp.status='completed'),0))
        ) AS current_balance,
        si.last_sale_date
      FROM customers c
@@ -50,12 +50,12 @@ const findByIdWithSummary = async (id) => {
        c.*,
        COALESCE(si.total_sales, 0) AS total_sales,
        COALESCE(sr.total_returns, 0) AS total_sales_returns,
-       COALESCE(pay.total_paid, 0) AS total_paid,
+       (COALESCE(pay.total_paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id JOIN sale_invoices rf_invoice ON rf_invoice.id=rn.invoice_id WHERE rf_invoice.customer_id=c.id AND rp.status='completed'),0)) AS total_paid,
        (c.previous_balance + COALESCE((SELECT SUM(b.payable) FROM bookings b WHERE b.customer_id = c.id AND b.booking_status <> 'Rejected' AND NOT EXISTS (SELECT 1 FROM booking_invoice_links WHERE booking_id = b.id)),0)
          - COALESCE((SELECT SUM(bp.amount) FROM booking_payments bp WHERE bp.customer_id = c.id AND NOT EXISTS (SELECT 1 FROM booking_invoice_links WHERE booking_id = bp.booking_id)),0)
          + COALESCE(si.total_sales, 0)
          - COALESCE(sr.total_returns, 0)
-         - COALESCE(pay.total_paid, 0)
+         - (COALESCE(pay.total_paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id JOIN sale_invoices rf_invoice ON rf_invoice.id=rn.invoice_id WHERE rf_invoice.customer_id=c.id AND rp.status='completed'),0))
        ) AS current_balance,
        si.last_sale_date,
        pay.last_payment_date

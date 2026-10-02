@@ -2,17 +2,50 @@ const { splitSql, loadMigrations, getHistory, validateHistory } = require('./mig
 
 const normalizeType = value => value.toLowerCase().replace(/\b((?:tiny|small|medium|big)?int)\(\d+\)/g, '$1').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
 const identifiers = value => value.split(',').map(part => part.trim().replace(/`/g, ''));
-const expression = value => value.toLowerCase().replace(/[\s`()]/g, '');
+const expression = value => value.toLowerCase().replace(/\\'/g, "'").replace(/_utf8mb4(?=')/g, '').replace(/[\s`()]/g, '');
 function normalizeDefault(value) {
   if (value == null || /^null$/i.test(value)) return null;
   return /^current_timestamp(?:\(\))?$/i.test(value) ? 'CURRENT_TIMESTAMP' : String(value).replace(/^'(.*)'$/s, '$1');
 }
 
-// Read the CREATE definitions as the schema contract so there is no second,
+function contractMigrations(migrations) {
+  const definitions = new Map();
+  for (const migration of migrations) {
+    const create = /^CREATE TABLE\s+`?(\w+)`?\s*\(([\s\S]*)\)\s*ENGINE=/i.exec(migration.sql);
+    if (create) {
+      if (definitions.has(create[1])) throw new Error(`Repeated table definition: ${create[1]}`);
+      definitions.set(create[1], { filename: migration.filename, parts: splitSql(create[2], ',') });
+      continue;
+    }
+    const alter = /^ALTER TABLE\s+`?(\w+)`?\s+([\s\S]+)$/i.exec(migration.sql);
+    if (!alter) continue;
+    const table = definitions.get(alter[1]);
+    if (!table) throw new Error(`ALTER references unknown table in ${migration.filename}`);
+    for (const clause of splitSql(alter[2], ',')) {
+      const add = /^ADD\s+(?:COLUMN\s+)?([\s\S]+)$/i.exec(clause);
+      const modify = /^MODIFY\s+(?:COLUMN\s+)?`?(\w+)`?\s+([\s\S]+)$/i.exec(clause);
+      const drop = /^DROP\s+(COLUMN|INDEX|KEY|FOREIGN KEY|CHECK)\s+`?(\w+)`?$/i.exec(clause);
+      if (add) table.parts.push(add[1]);
+      else if (modify || drop) {
+        const name = (modify || drop)[modify ? 1 : 2];
+        const index = table.parts.findIndex(part => {
+          if (modify || drop[1].toUpperCase() === 'COLUMN') return new RegExp(`^\x60?${name}\x60?\\s`, 'i').test(part);
+          return new RegExp(`^(?:(?:UNIQUE\\s+)?(?:KEY|INDEX)|CONSTRAINT)\\s+\x60?${name}\x60?\\s`, 'i').test(part);
+        });
+        if (index < 0) throw new Error(`Unknown ALTER target ${name} in ${migration.filename}`);
+        if (modify) table.parts[index] = `${name} ${modify[2]}`;
+        else table.parts.splice(index, 1);
+      } else throw new Error(`Unsupported ALTER clause in ${migration.filename}: ${clause}`);
+    }
+  }
+  return [...definitions].map(([name, table]) => ({ filename: table.filename, sql: `CREATE TABLE ${name} (${table.parts.join(', ')}) ENGINE=InnoDB` }));
+}
+
+// Read the CREATE/ALTER definitions as the schema contract so there is no second,
 // hand-maintained list of expected columns that can fall out of date.
 function schemaContract(migrations = loadMigrations()) {
   const tables = [];
-  for (const migration of migrations) {
+  for (const migration of contractMigrations(migrations)) {
     const match = /^CREATE TABLE\s+`?(\w+)`?\s*\(([\s\S]*)\)\s*ENGINE=/i.exec(migration.sql);
     if (!match) continue;
     const table = { name: match[1], columns: [], indexes: [], foreignKeys: [], checks: [] };
@@ -59,6 +92,13 @@ async function validateSchema(conn, migrations = loadMigrations()) {
     JOIN information_schema.CHECK_CONSTRAINTS c ON c.CONSTRAINT_SCHEMA = t.CONSTRAINT_SCHEMA AND c.CONSTRAINT_NAME = t.CONSTRAINT_NAME
     WHERE t.CONSTRAINT_SCHEMA = DATABASE() AND t.CONSTRAINT_TYPE = 'CHECK'`);
   const errors = [];
+  const expectedTriggers = migrations.map(migration => /^CREATE TRIGGER\s+(\w+)\s+(BEFORE|AFTER)\s+(UPDATE|DELETE|INSERT)\s+ON\s+(\w+)\s+FOR EACH ROW\s+([\s\S]+)$/i.exec(migration.sql)).filter(Boolean);
+  const [triggers] = await conn.query('SELECT TRIGGER_NAME, EVENT_MANIPULATION, EVENT_OBJECT_TABLE, ACTION_TIMING, ACTION_STATEMENT FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()');
+  for (const trigger of expectedTriggers) {
+    const actual = triggers.find(value => value.TRIGGER_NAME === trigger[1]);
+    if (!actual || actual.ACTION_TIMING !== trigger[2].toUpperCase() || actual.EVENT_MANIPULATION !== trigger[3].toUpperCase() || actual.EVENT_OBJECT_TABLE !== trigger[4] || expression(actual.ACTION_STATEMENT) !== expression(trigger[5])) errors.push(`Missing/changed trigger ${trigger[1]}`);
+  }
+  for (const trigger of triggers) if (!expectedTriggers.some(value => value[1] === trigger.TRIGGER_NAME)) errors.push(`Untracked trigger ${trigger.TRIGGER_NAME}`);
   for (const expected of contract) {
     const actual = tables.find(table => table.TABLE_NAME === expected.name);
     if (!actual) { errors.push(`Missing table ${expected.name}`); continue; }
@@ -89,7 +129,11 @@ async function validateSchema(conn, migrations = loadMigrations()) {
   const [[settings]] = await conn.query('SELECT COUNT(*) AS n FROM access_control_settings WHERE id = 1');
   const [[sequence]] = await conn.query("SELECT COUNT(*) AS n FROM sequence_counters WHERE name = 'expense_voucher' AND next_value >= 1");
   if (Number(settings.n) !== 1 || Number(sequence.n) !== 1) throw new Error('Required settings/sequence bootstrap rows are missing');
+  if (contract.some(table => table.name === 'store_settings')) {
+    const [[bootstrap]] = await conn.query("SELECT COUNT(*) AS n FROM stores s JOIN store_settings c ON c.store_id=s.id WHERE s.id=1 AND s.purpose='business'");
+    if (Number(bootstrap.n) !== 1) throw new Error('Required default business/store settings are missing');
+  }
   return { migrations: migrations.length, tables: contract.length, columns: columns.filter(column => column.TABLE_NAME !== '_schema_migrations').length, foreignKeys: contract.reduce((sum, table) => sum + table.foreignKeys.length, 0), checks: contract.reduce((sum, table) => sum + table.checks.length, 0) };
 }
 
-module.exports = { schemaContract, validateSchema, normalizeType, normalizeDefault };
+module.exports = { schemaContract, validateSchema, normalizeType, normalizeDefault, contractMigrations };

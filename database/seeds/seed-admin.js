@@ -12,7 +12,7 @@ const  pool  = require("../../src/config/db");
 const { hashPassword } = require("../../src/utils/password");
 const permissionModel = require("../../src/modules/access-control/permission.model");
 const groupPermissionModel = require("../../src/modules/access-control/group-permission.model");
-const BASE_PERMISSIONS = require("./base-permissions");
+const BASE_PERMISSIONS = require("./all-permissions");
 
 const ADMIN = {
   fullName: process.env.ADMIN_FULL_NAME || "System Administrator",

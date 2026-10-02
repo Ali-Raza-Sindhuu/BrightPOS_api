@@ -4,9 +4,9 @@ const config = require('../config/env');
 const ApiError = require('../utils/api-error');
 const asyncHandler = require('../utils/async-handler');
 
-async function consumeLoginAttempt(ip, identifier) {
+async function consumeLoginAttempt(ip, identifier, database = pool) {
   const buckets = [[`ip:${ip}`, 60], [`account:${ip}:${identifier.toLowerCase()}`, 10]];
-  const conn = await pool.getConnection();
+  const conn = await database.getConnection();
   let limited = false;
   try {
     await conn.beginTransaction();
@@ -24,8 +24,9 @@ async function consumeLoginAttempt(ip, identifier) {
   if (limited) throw new ApiError(429, 'Too many login attempts; try again in 15 minutes');
 }
 const loginLimit = asyncHandler(async (req, res, next) => {
-  const identifier = req.body.email || req.body.username || req.body.identifier;
-  if (typeof identifier !== 'string' || !identifier.trim() || identifier.length > 255 || typeof req.body.password !== 'string' || !req.body.password || req.body.password.length > 1024) throw new ApiError(400, 'Valid username/email and password are required');
+  const body=req.body || {};
+  const identifier = body.email || body.username || body.identifier;
+  if (typeof identifier !== 'string' || !identifier.trim() || identifier.length > 255 || typeof body.password !== 'string' || !body.password || body.password.length > 1024) throw new ApiError(400, 'Valid username/email and password are required');
   await consumeLoginAttempt(req.ip, identifier.trim());
   next();
 });

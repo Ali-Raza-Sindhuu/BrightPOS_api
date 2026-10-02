@@ -37,6 +37,7 @@ async function get(id) {
 }
 
 async function create(body) {
+  body={...body,booking_id:require('../../utils/validation').id(body.booking_id,'booking_id'),amount:require('../../utils/money').money(body.amount,'amount',{positive:true})};
   if (!body.booking_id) throw new ApiError(422, 'booking_id is required');
   if (!Number.isFinite(body.amount) || body.amount <= 0) throw new ApiError(422, 'amount must be a positive number');
   if (body.payment_method && !VALID_METHODS.includes(body.payment_method)) {
@@ -90,17 +91,18 @@ await conn.query('UPDATE bookings SET paid = ?, to_be_paid = ?, payment_status =
 async function update(id, body) {
   require('../../utils/validation').rejectFields(body, ['amount', 'booking_id', 'customer_id']);
   const payment = await get(id);
-  const [[linked]] = await pool.query('SELECT invoice_id FROM booking_invoice_links WHERE booking_id = ?', [payment.booking_id]);
-  if (linked) throw new ApiError(409, 'Allocated booking advances are immutable');
   if (body.payment_method && !VALID_METHODS.includes(body.payment_method)) {
     throw new ApiError(422, `payment_method must be one of: ${VALID_METHODS.join(', ')}`);
   }
-  await pool.query('UPDATE booking_payments SET payment_date = ?, payment_method = ?, remarks = ? WHERE id = ?', [
-    body.payment_date ?? payment.payment_date,
-    body.payment_method ?? payment.payment_method,
-    body.remarks !== undefined ? body.remarks : payment.remarks,
-    id,
-  ]);
+  const conn=await pool.getConnection();
+  try {
+    await conn.beginTransaction();await getBookingForUpdate(conn,payment.booking_id);
+    const [[current]]=await conn.query('SELECT * FROM booking_payments WHERE id=? FOR UPDATE',[id]);if(!current)throw new ApiError(404,'Booking payment not found');
+    await conn.query('UPDATE booking_payments SET payment_date = ?, payment_method = ?, remarks = ? WHERE id = ?',[
+      body.payment_date ?? current.payment_date,body.payment_method ?? current.payment_method,body.remarks !== undefined ? body.remarks : current.remarks,id,
+    ]);
+    await conn.commit();
+  }catch(error){await conn.rollback();throw error;}finally{conn.release();}
   return findById(id);
 }
 

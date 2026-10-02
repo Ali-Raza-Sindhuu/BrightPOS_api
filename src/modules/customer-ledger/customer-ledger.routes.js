@@ -51,8 +51,10 @@ async function getCustomerLedgerData(customerId) {
     debit: Number(customer.previous_balance) > 0 ? Number(customer.previous_balance) : 0,
     credit: Number(customer.previous_balance) < 0 ? Math.abs(Number(customer.previous_balance)) : 0,
   };
+  const [refundPayments]=await pool.query("SELECT p.id,n.created_at AS date,n.number,p.amount_minor/100 AS amount FROM refund_payments p JOIN refund_notes n ON n.id=p.refund_id JOIN sale_invoices i ON i.id=n.invoice_id WHERE i.customer_id=? AND p.status='completed'",[customerId]);
 
   const debitEntries = [
+  ...refundPayments.map(r=>({id:r.id,date:r.date,reference:r.number,module:'Refund Payment',description:'Money refunded to customer',debit:Number(r.amount),credit:0})),
   ...invoices.map((r) => ({
     id: r.id,
     date: r.date,

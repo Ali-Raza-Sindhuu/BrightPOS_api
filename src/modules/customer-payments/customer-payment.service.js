@@ -63,6 +63,8 @@ async function createPayment(body) {
     if (body.invoice_id) {
       const invoice = await paymentModel.getInvoiceForUpdate(conn, body.invoice_id);
       if (!invoice) throw new ApiError(422, `invoice_id ${body.invoice_id} does not exist`);
+      const [[counter]]=await conn.query('SELECT id FROM checkout_sessions WHERE invoice_id=?',[invoice.id]);
+      if(counter)throw new ApiError(409,'Counter payments must use the checkout workflow');
       if (Number(invoice.customer_id) !== Number(body.customer_id)) {
         throw new ApiError(422, 'invoice_id does not belong to this customer_id');
       }
@@ -117,6 +119,10 @@ async function updatePayment(id, body) {
   rejectFields(body, ['amount', 'customer_id', 'invoice_id']);
   const payment = await paymentModel.findById(id);
   if (!payment) throw new ApiError(404, 'Payment not found');
+  const [[counter]]=await pool.query('SELECT id FROM checkout_sessions WHERE invoice_id=?',[payment.invoice_id]);
+  if(counter)throw new ApiError(409,'Posted counter payments are immutable');
+  const [[refund]]=await pool.query('SELECT id FROM refund_notes WHERE invoice_id=?',[payment.invoice_id]);
+  if(refund)throw new ApiError(409,'Refund-linked payment metadata is immutable');
 
   if (body.payment_method && !VALID_METHODS.includes(body.payment_method)) {
     throw new ApiError(422, `payment_method must be one of: ${VALID_METHODS.join(', ')}`);
@@ -138,9 +144,13 @@ async function deletePayment(id) {
 
     const payment = await paymentModel.getByIdForUpdate(conn, id);
     if (!payment) throw new ApiError(404, 'Payment not found');
+    const [[counter]]=await conn.query('SELECT id FROM checkout_sessions WHERE invoice_id=?',[payment.invoice_id]);
+    if(counter)throw new ApiError(409,'Posted counter payments are retained; use refund routing');
 
     if (payment.invoice_id) {
       const invoice = await paymentModel.getInvoiceForUpdate(conn, payment.invoice_id);
+      const [[refund]]=await conn.query('SELECT id FROM refund_notes WHERE invoice_id=? FOR UPDATE',[payment.invoice_id]);
+      if(refund)throw new ApiError(409,'Refund-linked payments are retained');
       await paymentModel.deleteById(conn, id);
 
       if (invoice) {

@@ -23,7 +23,8 @@ async function sumPaymentsForInvoice(conn, invoiceId, excludePaymentId = null) {
     params.push(excludePaymentId);
   }
   const [rows] = await conn.query(query, params);
-  return Number(rows[0].total);
+  const [[refund]]=await conn.query("SELECT COALESCE(SUM(p.amount_minor),0)/100 AS amount FROM refund_payments p JOIN refund_notes n ON n.id=p.refund_id WHERE n.invoice_id=? AND p.status='completed'",[invoiceId]);
+  return Number(rows[0].total)-Number(refund.amount);
 }
 
 async function insertPayment(conn, data) {

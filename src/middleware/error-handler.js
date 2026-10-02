@@ -13,13 +13,17 @@ function errorHandler(err, req, res, next) {
     : err.message;
 
   if (statusCode === 500) {
-    console.error(err);
+    // Driver errors can contain SQL values, password hashes and personal data.
+    console.error(JSON.stringify({event:'request.error',request_id:req.id,code:err.code || err.apiCode || 'INTERNAL_ERROR',name:err.name}));
   }
   if (statusCode === 429) res.set('Retry-After', '900');
 
   res.status(statusCode).json({
     success: false,
     message,
+    code: err.apiCode || ({400:'INVALID_REQUEST',401:'UNAUTHENTICATED',403:'FORBIDDEN',404:'NOT_FOUND',409:'CONFLICT',413:'PAYLOAD_TOO_LARGE',422:'VALIDATION_FAILED',429:'RATE_LIMITED',503:'UNAVAILABLE'}[statusCode] || 'INTERNAL_ERROR'),
+    ...(err instanceof ApiError && err.details ? {details:err.details} : {}),
+    ...(req.id ? {request_id:req.id} : {}),
   });
 }
 

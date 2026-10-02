@@ -55,4 +55,6 @@ module.exports = {
   getOne,
   create,
   update,
+  post: catchAsync(async (req,res)=>sendResponse(res,200,'Expense voucher posted',await service.post(req.params.id))),
+  cancel: catchAsync(async (req,res)=>sendResponse(res,200,'Expense voucher cancelled',await service.cancel(req.params.id))),
 };

@@ -14,16 +14,29 @@ test('SQL parser preserves quoted separators and ignores comments', () => {
 test('baseline is consecutive and contains each expected table once', () => {
   const migrations = loadMigrations();
   const tables = schemaContract(migrations);
-  assert.equal(migrations.length, 54);
-  assert.equal(tables.length, 51);
-  assert.equal(new Set(tables.map(table => table.name)).size, 51);
-  assert.equal(tables.reduce((n, table) => n + table.foreignKeys.length, 0), 68);
+  assert.equal(migrations.length, 147);
+  assert.equal(tables.length, 85);
+  assert.equal(new Set(tables.map(table => table.name)).size, 85);
+  const baseline = schemaContract(migrations.slice(0, 55));
+  assert.equal(baseline.length, 52);
+  assert.equal(baseline.reduce((n, table) => n + table.foreignKeys.length, 0), 68);
   const first = migrations[0];
   const row = { ...first, state: 'applied' };
   assert.doesNotThrow(() => validateHistory(migrations, [row]));
   assert.throws(() => validateHistory(migrations, [{ ...row, checksum: 'modified' }]), /Checksum/);
   assert.throws(() => validateHistory(migrations, [{ ...row, state: 'running' }]), /Interrupted/);
   assert.throws(() => validateHistory(migrations, [{ ...row, version: 2 }]), /nonconsecutive/);
+});
+
+test('schema contract applies ALTER definitions and rejects unsupported changes', () => {
+  const base = { filename: 'base.sql', sql: 'CREATE TABLE example (id INT NOT NULL, PRIMARY KEY (id)) ENGINE=InnoDB' };
+  const altered = schemaContract([base, { filename: 'alter.sql', sql: 'ALTER TABLE example ADD COLUMN amount BIGINT UNSIGNED NULL, ADD KEY idx_amount (amount), MODIFY COLUMN id BIGINT NOT NULL' }]);
+  assert.equal(altered[0].columns[0].type, 'bigint');
+  assert.equal(altered[0].columns[1].name, 'amount');
+  assert.equal(altered[0].indexes[1].name, 'idx_amount');
+  const dropped = schemaContract([base, { filename: 'alter.sql', sql: 'ALTER TABLE example ADD COLUMN amount INT NULL, DROP COLUMN amount' }]);
+  assert.equal(dropped[0].columns.length, 1);
+  assert.throws(() => schemaContract([base, { filename: 'bad.sql', sql: 'ALTER TABLE example RENAME COLUMN id TO other_id' }]), /Unsupported ALTER/);
 });
 
 test('database options enforce TLS identity verification and reject conflicting configuration', () => {

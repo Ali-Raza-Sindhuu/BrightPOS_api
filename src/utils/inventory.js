@@ -10,6 +10,10 @@ async function adjustInventory(conn, itemId, unitId, businessUnitId, delta) {
   if (!item) throw new ApiError(422, 'Item not found');
   const [[row]] = await conn.query('SELECT id, quantity FROM inventory WHERE item_id = ? AND unit_id = ? AND business_unit_id = ? FOR UPDATE', [itemId, unitId, businessUnitId]);
   if (Number(row?.quantity || 0) + Number(delta) < -0.000001) throw new ApiError(409, 'Insufficient stock to post or reverse this movement');
+  if(Number(delta)<0) {
+    const [[reserved]]=await conn.query("SELECT COALESCE(SUM(allocated_quantity-consumed_quantity),0) AS quantity FROM offline_stock_allocations WHERE item_id=? AND business_unit_id=? AND status IN ('active','reconciling')",[itemId,businessUnitId]);
+    if(Number(row?.quantity || 0)+Number(delta)<Number(reserved.quantity)-0.000001)throw new ApiError(409,'Stock is reserved for offline transactions');
+  }
   if (row) await conn.query('UPDATE inventory SET quantity = quantity + ? WHERE id = ?', [delta, row.id]);
   else await conn.query('INSERT INTO inventory (item_id, unit_id, business_unit_id, quantity) VALUES (?, ?, ?, ?)', [itemId, unitId, businessUnitId, delta]);
 }

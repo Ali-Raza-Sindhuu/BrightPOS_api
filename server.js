@@ -32,7 +32,7 @@ let server;
 // which matters on shared hosting where the per-user connection cap is low.
 function shutdown(signal) {
   console.log(`[server] ${signal} received — shutting down.`);
-  const done = () => pool.end().catch(() => {}).then(() => process.exit(0));
+  const done = () => Promise.allSettled([pool.end(),require('./src/modules/demo/demo.service').closePool()]).then(() => process.exit(0));
   if (server) {
     server.close(done);
     // Don't hang forever on a stuck keep-alive connection.

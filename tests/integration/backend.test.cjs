@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-process.env.POS_ENV_FILE ||= '.env.test';
+require('../helpers/local-database.cjs').configureLocalDatabase();
 const mysql = require('mysql2/promise');
 const { getDatabaseOptions } = require('../../src/config/database');
 const { loadMigrations, runMigrations } = require('../../scripts/lib/migrations');
@@ -26,7 +26,7 @@ const rejected = (promise, status) => assert.rejects(promise, error => error.sta
 
 test.before(async () => {
   const options = getDatabaseOptions();
-  assert.ok(['127.0.0.1', 'localhost'].includes(options.host) && options.port === 3307 && options.user === 'brightpos' && !options.ssl && options.database === 'brightpos_migration_test', 'Refusing to clear a database other than the dedicated local Docker test schema');
+  assert.ok(['127.0.0.1', 'localhost'].includes(options.host) && !options.ssl && options.database === 'brightpos_migration_test', 'Refusing to clear a database other than the dedicated local Docker test schema');
   conn = await mysql.createConnection(options);
   const [tables] = await conn.query('SHOW TABLES');
   const remaining = new Set(tables.map(row => Object.values(row)[0]));

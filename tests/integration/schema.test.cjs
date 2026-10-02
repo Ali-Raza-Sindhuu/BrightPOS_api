@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const mysql = require('mysql2/promise');
 const crypto = require('node:crypto');
 
-process.env.POS_ENV_FILE ||= '.env.docker';
+require('../helpers/local-database.cjs').configureLocalDatabase();
 const { getDatabaseOptions } = require('../../src/config/database');
 const { loadMigrations, runMigrations } = require('../../scripts/lib/migrations');
 const { validateSchema, schemaContract } = require('../../scripts/lib/schema');
@@ -31,14 +31,14 @@ async function clearTestSchema(connection) {
 
 test.before(async () => {
   const options = getDatabaseOptions();
-  assert.ok(['127.0.0.1', 'localhost'].includes(options.host) && options.port === 3307 && options.user === 'brightpos' && !options.ssl,
-    'Database tests only operate on the local Docker service at localhost:3307 with the brightpos test user');
+  assert.ok(['127.0.0.1', 'localhost'].includes(options.host) && !options.ssl && names.includes(options.database),
+    'Database tests only operate on explicitly named local Docker fixture schemas');
   [conn, failure, history] = await Promise.all(names.map(database => mysql.createConnection({ ...options, database })));
   for (const connection of [conn, failure, history]) await clearTestSchema(connection);
 });
 test.after(async () => {
   // Retain disposable schemas for inspection; next test run cleans only these
-  // explicitly named databases. brightpos_local is never changed by tests.
+  // explicitly named databases. brightposlocal is never changed by tests.
   await Promise.all([conn, failure, history].filter(Boolean).map(connection => connection.end()));
 });
 
@@ -193,11 +193,62 @@ test('concurrent runner lock prevents interleaved schema changes', async () => {
 });
 
 test('failed migration stays running and is never silently marked applied', async () => {
-  const broken = [...migrations, { version: 55, filename: '0055_invalid.sql', sql: 'ALTER TABLE missing_table ADD bad_column INT', checksum: 'a'.repeat(64) }];
-  await assert.rejects(runMigrations(failure, broken, { log }), /0055_invalid.sql failed/);
-  const [[row]] = await failure.query('SELECT state FROM _schema_migrations WHERE version = 55');
+  const version = migrations.at(-1).version + 1;
+  const filename = `${String(version).padStart(4, '0')}_invalid.sql`;
+  const broken = [...migrations, { version, filename, sql: 'ALTER TABLE missing_table ADD bad_column INT', checksum: 'a'.repeat(64) }];
+  await assert.rejects(runMigrations(failure, broken, { log }), error => error.message.includes(`${filename} failed`));
+  const [[row]] = await failure.query('SELECT state FROM _schema_migrations WHERE version = ?', [version]);
   assert.equal(row.state, 'running');
   await assert.rejects(runMigrations(failure, broken, { log }), /Interrupted\/failed/);
+});
+
+test('55-migration upgrade preserves historical values and backfills store and product identity', async () => {
+  await runMigrations(history, migrations.slice(0, 55), { log });
+  await history.query("INSERT INTO item_details (item_name, label_barcode, sale_price) VALUES ('Legacy loaf', 'upgrade-loaf', 125.25)");
+  await history.query("INSERT INTO customers (customer_name, previous_balance) VALUES ('Legacy customer', 67.89)");
+  const [columns] = await history.query("SHOW COLUMNS FROM item_details");
+  const projection = columns.map(column => mysql.escapeId(column.Field)).join(',');
+  const [before] = await history.query(`SELECT ${projection} FROM item_details ORDER BY id`);
+  const { backupDatabase } = require('../../scripts/backup-database');
+  const fs = require('node:fs');
+  const { splitSql } = require('../../scripts/lib/migrations');
+  const filename = await backupDatabase({ ...getDatabaseOptions(), database: names[2] });
+  // Restore into the explicitly whitelisted empty fixture, never into shop data.
+  await clearTestSchema(failure);
+  try {
+    for (const sql of splitSql(fs.readFileSync(filename, 'utf8'))) await failure.query(sql);
+    assert.deepEqual((await failure.query(`SELECT ${projection} FROM item_details ORDER BY id`))[0], before);
+    await validateSchema(failure, migrations.slice(0, 55));
+  } finally {
+    await failure.query('SET FOREIGN_KEY_CHECKS=1');
+    await clearTestSchema(failure);
+    fs.unlinkSync(filename);
+  }
+  assert.equal((await runMigrations(history, migrations, { log })).executed, migrations.length-55);
+  assert.deepEqual((await history.query(`SELECT ${projection} FROM item_details ORDER BY id`))[0], before);
+  const [[item]] = await history.query('SELECT store_id, product_id, sku FROM item_details WHERE id=1');
+  assert.equal(item.store_id, 1);
+  assert.equal(Number(item.product_id), 1);
+  assert.equal(item.sku, 'LEGACY-1');
+  assert.equal((await history.query('SELECT previous_balance FROM customers WHERE id=1'))[0][0].previous_balance, '67.89');
+  await validateSchema(history, migrations);
+  assert.equal((await runMigrations(history, migrations, { log })).executed, 0);
+  await clearTestSchema(history);
+});
+
+test('new schema rejects cross-store references, duplicate open shifts and mutable audit records', async () => {
+  await conn.beginTransaction();
+  try {
+    await conn.query("INSERT INTO stores (name, code) VALUES ('Other fixture', 'OTHER')");
+    await assert.rejects(conn.query("INSERT INTO registers (store_id, name, code, business_unit_id) VALUES (2, 'Invalid', 'BAD', 1)"), { code: 'ER_NO_REFERENCED_ROW_2' });
+    const [register] = await conn.query("INSERT INTO registers (name, code, business_unit_id) VALUES ('Counter', 'TEST', 1)");
+    await conn.query('INSERT INTO register_shifts (register_id, opened_by) VALUES (?, 1)', [register.insertId]);
+    await assert.rejects(conn.query('INSERT INTO register_shifts (register_id, opened_by) VALUES (?, 1)', [register.insertId]), { code: 'ER_DUP_ENTRY' });
+    await conn.query("INSERT INTO audit_events (action, entity_type, actor_id) VALUES ('TEST', 'fixture', 1)");
+    await assert.rejects(conn.query("UPDATE audit_events SET reason='changed'"), /append-only/);
+    await assert.rejects(conn.query('DELETE FROM audit_events'), /append-only/);
+    await assert.rejects(conn.query('INSERT INTO offline_stock_allocations (public_id, allocated_quantity, consumed_quantity, expires_at, register_id, item_id, business_unit_id) VALUES (?, 1, 2, NOW(), ?, 1, 1)', [crypto.randomUUID(), register.insertId]), { code: 'ER_CHECK_CONSTRAINT_VIOLATED' });
+  } finally { await conn.rollback(); }
 });
 
 test('legacy and nonempty untracked databases are refused without modification', async () => {

@@ -13,6 +13,10 @@ async function getDaybook(from, to) {
   const [rows] = await pool.query(`SELECT * FROM (
     SELECT id, payment_date AS date, CONCAT('CP-',id) AS reference, amount AS cash_in, 0 AS cash_out, 'Customer Payment' AS module, COALESCE(remarks,'Cash received') AS description FROM customer_payments WHERE LOWER(payment_method) = 'cash'
     UNION ALL
+    SELECT p.id,n.created_at,CONCAT('RF-',p.id),0,p.amount_minor/100,'Refund Payment',n.reason FROM refund_payments p JOIN refund_notes n ON n.id=p.refund_id WHERE p.method='cash' AND p.status='completed'
+    UNION ALL
+    SELECT id,created_at,CONCAT('CM-',id),IF(direction='in',amount_minor/100,0),IF(direction='out',amount_minor/100,0),'Register Cash Movement',reason FROM cash_movements WHERE kind IN ('paid_in','paid_out','safe_drop')
+    UNION ALL
     SELECT id, payment_date, CONCAT('SP-',id), 0, amount, 'Supplier Payment', COALESCE(note,'Cash paid') FROM supplier_payments WHERE LOWER(payment_method) = 'cash'
     UNION ALL
     SELECT bp.id, bp.payment_date, CONCAT('BP-',bp.id), bp.amount, 0, 'Booking Payment', COALESCE(bp.remarks,'Booking advance') FROM booking_payments bp WHERE LOWER(bp.payment_method) = 'cash' AND NOT EXISTS (SELECT 1 FROM booking_invoice_links WHERE booking_id = bp.booking_id)

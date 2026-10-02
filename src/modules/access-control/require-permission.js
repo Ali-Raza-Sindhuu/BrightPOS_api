@@ -22,11 +22,11 @@ function requirePermission(permissionKey) {
   return async (req, res, next) => {
     try {
       if (!req.user) {
-        return res.status(401).json({ success: false, message: "Not authenticated" });
+        return next(new (require('../../utils/api-error'))(401,'Not authenticated'));
       }
       const perms = await getUserPermissions(req.user.groupId);
       if (perms[permissionKey] !== "ALLOW") {
-        return res.status(403).json({ success: false, message: "Forbidden" });
+        return next(new (require('../../utils/api-error'))(403,'Forbidden'));
       }
       next();
     } catch (e) {

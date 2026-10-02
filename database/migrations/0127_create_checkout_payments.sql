@@ -1,0 +1,32 @@
+-- Database phase: additive upgrade; preserve applied migrations and existing data.
+CREATE TABLE checkout_payments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  store_id INT UNSIGNED NOT NULL DEFAULT 1,
+  public_id CHAR(36) NOT NULL,
+  method ENUM('cash','card','bank_transfer','wallet') NOT NULL,
+  status ENUM('pending','awaiting_customer','captured','failed','expired','cancelled','partially_refunded','refunded') NOT NULL DEFAULT 'pending',
+  amount_minor BIGINT UNSIGNED NOT NULL,
+  tendered_minor BIGINT UNSIGNED NULL,
+  change_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  refunded_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  fee_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  provider_reference VARCHAR(191) NULL,
+  idempotency_key VARCHAR(100) NOT NULL,
+  captured_at DATETIME NULL,
+  checkout_id BIGINT UNSIGNED NOT NULL,
+  provider_id BIGINT UNSIGNED NULL,
+  recorded_by INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_checkout_payments_store_row (store_id, id),
+  UNIQUE KEY uq_payment_public (public_id),
+  UNIQUE KEY uq_payment_request (store_id, idempotency_key),
+  UNIQUE KEY uq_payment_provider_ref (store_id, provider_id, provider_reference),
+  CONSTRAINT chk_payment_amount CHECK (amount_minor > 0 AND refunded_minor <= amount_minor AND fee_minor <= amount_minor),
+  CONSTRAINT chk_payment_change CHECK (change_minor = 0 OR (method = 'cash' AND tendered_minor IS NOT NULL AND tendered_minor >= amount_minor AND change_minor = tendered_minor - amount_minor)),
+  CONSTRAINT fk_checkout_payments_store FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT fk_checkout_payments_checkout_id FOREIGN KEY (store_id, checkout_id) REFERENCES checkout_sessions(store_id, id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT fk_checkout_payments_provider_id FOREIGN KEY (store_id, provider_id) REFERENCES payment_providers(store_id, id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT fk_checkout_payments_recorded_by FOREIGN KEY (store_id, recorded_by) REFERENCES users(store_id, id) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

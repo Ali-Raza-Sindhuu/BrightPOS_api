@@ -8,7 +8,7 @@
 // safe to re-run any time the catalog grows.
 require("../../src/config/load-environment");
 const permissionModel = require("../../src/modules/access-control/permission.model");
-const BASE_PERMISSIONS = require("./base-permissions");
+const BASE_PERMISSIONS = require("./all-permissions");
 
 async function seed() {
   console.log("[seed:permissions] Seeding base permission catalog...");

@@ -143,6 +143,7 @@ async function findById(id) {
 
 async function findByIdForUpdate(conn, id) {
   const [rows] = await conn.query('SELECT * FROM bookings WHERE id = ? FOR UPDATE', [id]);
+  if(rows[0])await require('../../utils/counter-booking').assertLegacyBooking(conn,id);
   return rows[0];
 }
 

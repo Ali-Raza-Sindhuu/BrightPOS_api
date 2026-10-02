@@ -52,6 +52,10 @@ async function createReturn(body) {
 
     const invoice = await returnModel.getInvoiceForUpdate(conn, body.sale_invoice_id);
     if (!invoice) throw new ApiError(422, `sale_invoice_id ${body.sale_invoice_id} does not exist`);
+    const [[counter]]=await conn.query('SELECT id FROM checkout_sessions WHERE invoice_id=?',[invoice.id]);
+    if(counter)throw new ApiError(409,'Counter receipts use the receipt-linked refund endpoint');
+    const [[refund]]=await conn.query('SELECT id FROM refund_notes WHERE invoice_id=? FOR UPDATE',[invoice.id]);
+    if(refund)throw new ApiError(409,'Refunded invoices use the receipt-linked refund endpoint');
 
     const originalLines = await returnModel.getOriginalLinesByInvoice(conn, body.sale_invoice_id);
     const originalByItem = new Map(originalLines.map((r) => [r.item_id, r]));

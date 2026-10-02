@@ -13,6 +13,7 @@ const pool = mysql.createPool({
   keepAliveInitialDelay: 0,
   dateStrings: true,
 });
+require('./audited-pool')(pool);
 
 // Fails fast on boot if MySQL isn't reachable / credentials are wrong,
 // instead of surfacing a confusing error on the first request.

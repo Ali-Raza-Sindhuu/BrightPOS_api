@@ -1,0 +1,91 @@
+# Use VS Code REST Client or copy requests into Postman.
+# Run requests individually. These demo requests create disposable visitor data.
+@api = http://127.0.0.1:5000/api
+
+### Health: must return 200
+GET {{api}}/health
+
+### Backend contract: money is integer minor units; writes need stable keys
+GET {{api}}/openapi.json
+
+### Independent retail visitor, with no owner credentials
+# @name retail
+POST {{api}}/demo/start
+Content-Type: application/json
+
+{"scenario":"retail"}
+
+### Sample catalog and stock
+GET {{api}}/demo/catalog
+Authorization: Bearer {{retail.response.body.data.token}}
+
+### Create a cart
+# @name cart
+POST {{api}}/demo/checkouts
+Authorization: Bearer {{retail.response.body.data.token}}
+Idempotency-Key: review-cart-{{$guid}}
+Content-Type: application/json
+
+{}
+
+### Server prices one sample item
+# @name priced
+PATCH {{api}}/demo/checkouts/{{cart.response.body.data.id}}
+Authorization: Bearer {{retail.response.body.data.token}}
+Idempotency-Key: review-lines-{{$guid}}
+Content-Type: application/json
+
+{"revision":1,"lines":[{"item_id":{{retail.response.body.data.item_ids[0]}},"quantity":"1"}]}
+
+### Cash payment (re-send the SAME request/key to check retry safety)
+POST {{api}}/demo/checkouts/{{cart.response.body.data.id}}/payments
+Authorization: Bearer {{retail.response.body.data.token}}
+Idempotency-Key: review-cash-{{cart.response.body.data.id}}
+Content-Type: application/json
+
+{"method":"cash","amount_minor":{{priced.response.body.data.total_minor}}}
+
+### Complete once; duplicate request returns same invoice
+# @name completed
+POST {{api}}/demo/checkouts/{{cart.response.body.data.id}}/complete
+Authorization: Bearer {{retail.response.body.data.token}}
+Idempotency-Key: review-complete-{{cart.response.body.data.id}}
+Content-Type: application/json
+
+{}
+
+### Receipt data and stock result
+GET {{api}}/demo/receipts/{{completed.response.body.data.invoice_id}}
+Authorization: Bearer {{retail.response.body.data.token}}
+
+###
+GET {{api}}/demo/stock
+Authorization: Bearer {{retail.response.body.data.token}}
+
+### Separate bakery visitor includes a sample cake booking and deposit
+# @name bakery
+POST {{api}}/demo/start
+Content-Type: application/json
+
+{"scenario":"bakery"}
+
+###
+GET {{api}}/demo/bakery-orders
+Authorization: Bearer {{bakery.response.body.data.token}}
+
+### Restart expires only this visitor's session; use returned new token afterward
+POST {{api}}/demo/restart
+Authorization: Bearer {{retail.response.body.data.token}}
+Content-Type: application/json
+
+{}
+
+### Protected business route must return 401 without an owner/staff JWT
+GET {{api}}/counter/checkouts
+
+# Business manual review: log in through POST /auth/login using your existing
+# identifier/password locally. Use its JWT for /counter/me, /counter/settings,
+# /counter/registers, /counter/shifts, /counter/stock/reconcile and /counter/audit.
+# Create registers/providers/staff through documented owner routes as needed.
+# Keep returned register device tokens private. Existing groups may explicitly
+# deny permissions; operational roles never bypass those denials.

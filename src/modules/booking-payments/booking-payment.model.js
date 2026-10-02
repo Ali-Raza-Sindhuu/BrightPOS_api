@@ -6,6 +6,7 @@ async function getBookingForUpdate(conn, id) {
     [id]
   );
   if (rows[0]) {
+    await require('../../utils/counter-booking').assertLegacyBooking(conn,id);
     const [[link]] = await conn.query('SELECT invoice_id FROM booking_invoice_links WHERE booking_id = ?', [id]);
     if (link) throw new (require('../../utils/api-error'))(409, 'Booking converted; use invoice payments');
   }

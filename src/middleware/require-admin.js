@@ -1,16 +1,12 @@
 const ApiError = require("../utils/api-error");
 
-/**
- * Day 1 placeholder gate: role === 'admin' bypasses everything (per the fixed
- * RBAC model — admin has full access). The real per-functionality rights
- * engine (group_rights + hasRight()) is built on Day 2 and will replace this
- * for non-admin, group-based checks. Must run after `authenticate`.
- */
+// Owner gate supplements the existing group permission check. Explicit staff
+// assignments take precedence over a legacy admin/user account label.
 function requireAdmin(req, res, next) {
   if (!req.user) {
     return next(new ApiError(401, "Not authenticated"));
   }
-  if (req.user.role !== "admin") {
+  if (req.user.operationalRole ? req.user.operationalRole !== 'owner' : req.user.role !== 'admin') {
     return next(new ApiError(403, "Admin access required"));
   }
   next();

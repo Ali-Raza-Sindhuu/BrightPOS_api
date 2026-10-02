@@ -23,6 +23,7 @@ async function login(identifier, password) {
   }
 
   await userModel.touchLastLogin(user.id);
+  const ctx=await require('../counter/management.service').context(user);
 
   const token = signToken({
     id: user.id,
@@ -33,7 +34,7 @@ async function login(identifier, password) {
 
   return {
     token,
-    user: userModel.toSafeJSON(user),
+    user: {...userModel.toSafeJSON(user),operationalRole:ctx.role,storeId:ctx.storeId},
   };
 }
 

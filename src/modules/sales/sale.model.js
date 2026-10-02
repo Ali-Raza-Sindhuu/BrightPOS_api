@@ -38,9 +38,9 @@ function buildFilters({ search, customer_id, item_id, category_id, status, from_
   }
 
   const net = '(si.payable - COALESCE((SELECT SUM(total_amount) FROM sale_returns WHERE sale_invoice_id = si.id),0))';
-  if (status === 'paid') where.push('COALESCE(cp.paid,0) >= ' + net);
-  if (status === 'unpaid') where.push('COALESCE(cp.paid,0) = 0 AND ' + net + ' > 0');
-  if (status === 'partially_paid') where.push('COALESCE(cp.paid,0) > 0 AND COALESCE(cp.paid,0) < ' + net);
+  if (status === 'paid') where.push('(COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) >= ' + net);
+  if (status === 'unpaid') where.push('(COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) = 0 AND ' + net + ' > 0');
+  if (status === 'partially_paid') where.push('(COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) > 0 AND (COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) < ' + net);
   return { whereSql: where.length ? 'WHERE ' + where.join(' AND ') : '', havingSql: '', params };
 
 }
@@ -55,7 +55,7 @@ async function getCustomerById(conn, id) {
 async function getItemsForUpdate(conn, itemIds) {
   if (!itemIds.length) return [];
   const [rows] = await conn.query(
-    `SELECT id, item_name, sale_price, stock, item_unit_id, is_enable
+    `SELECT id, item_name, sale_price, purchase_price, stock, item_unit_id, is_enable
      FROM item_details WHERE id IN (?) FOR UPDATE`,
     [itemIds]
   );
@@ -64,8 +64,8 @@ async function getItemsForUpdate(conn, itemIds) {
 
 async function insertInvoiceHeader(conn, data) {
   const [result] = await conn.query(
-    `INSERT INTO sale_invoices (customer_id, business_unit_id, description, discount, sub_total, payable, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sale_invoices (customer_id, business_unit_id, description, discount, sub_total, payable, status, cashier_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.customer_id ?? null,
       data.business_unit_id,
@@ -74,6 +74,7 @@ async function insertInvoiceHeader(conn, data) {
       data.sub_total,
       data.payable,
       data.status,
+      require('../../utils/request-context').getStore()?.user.id || null,
     ]
   );
   return result.insertId;
@@ -101,9 +102,9 @@ async function setReceiptNo(conn, id, receiptNo) {
 }
 
 async function insertInvoiceItems(conn, invoiceId, items) {
-  const values = items.map((it) => [invoiceId, it.item_id, it.qty, it.unit_price, it.total_price]);
+  const values = items.map((it) => [invoiceId, it.item_id, it.qty, it.unit_price, it.total_price,it.cost_price_minor ?? null,it.discount_minor ?? null]);
   await conn.query(
-    `INSERT INTO sale_invoice_items (invoice_id, item_id, qty, unit_price, total_price) VALUES ?`,
+    `INSERT INTO sale_invoice_items (invoice_id, item_id, qty, unit_price, total_price,cost_price_minor,discount_minor) VALUES ?`,
     [values]
   );
 }
@@ -137,7 +138,7 @@ async function findAll({ limit, offset, search, customer_id, item_id, category_i
 
   const [rows] = await pool.query(
     `SELECT ${needsItemJoin ? 'DISTINCT' : ''} si.*, (si.payable - COALESCE((SELECT SUM(total_amount) FROM sale_returns WHERE sale_invoice_id = si.id),0)) AS net_payable, c.customer_name, c.mobile_number AS mobile,
-            COALESCE(cp.paid, 0) AS paid
+            ((COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0))-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) AS paid
      FROM sale_invoices si
      LEFT JOIN customers c ON c.id = si.customer_id
      LEFT JOIN (
@@ -183,7 +184,7 @@ const getNextReceipt = async () => {
 async function findById(id) {
   const [rows] = await pool.query(
     `SELECT si.*, (si.payable - COALESCE((SELECT SUM(total_amount) FROM sale_returns WHERE sale_invoice_id = si.id),0)) AS net_payable, c.customer_name, c.mobile_number AS mobile,
-            COALESCE(cp.paid, 0) AS paid
+            ((COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0))-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) AS paid
      FROM sale_invoices si
      LEFT JOIN customers c ON c.id = si.customer_id
      LEFT JOIN (
@@ -266,7 +267,7 @@ async function getSummary({ search, customer_id, item_id, category_id, status, f
        COALESCE(SUM(payable), 0) AS total_payable,
        COALESCE(SUM(paid), 0) AS total_paid
      FROM (
-       SELECT DISTINCT si.id, si.sub_total, (si.payable - COALESCE((SELECT SUM(total_amount) FROM sale_returns WHERE sale_invoice_id = si.id),0)) AS payable, COALESCE(cp.paid, 0) AS paid
+       SELECT DISTINCT si.id, si.sub_total, (si.payable - COALESCE((SELECT SUM(total_amount) FROM sale_returns WHERE sale_invoice_id = si.id),0)) AS payable, ((COALESCE(cp.paid,0)-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0))-COALESCE((SELECT SUM(rp.amount_minor)/100 FROM refund_payments rp JOIN refund_notes rn ON rn.id=rp.refund_id WHERE rn.invoice_id=si.id AND rp.status=\'completed\'),0)) AS paid
        FROM sale_invoices si
        LEFT JOIN customers c ON c.id = si.customer_id
        LEFT JOIN (

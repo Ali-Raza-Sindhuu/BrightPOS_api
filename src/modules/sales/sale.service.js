@@ -61,6 +61,8 @@ function validatePayloadShape(body) {
 }
 
 async function createSale(body) {
+  const actor=require('../../utils/request-context').getStore()?.user;
+  if(actor?.operationalRole==='cashier')throw new ApiError(403,'Cashier sales require scoped counter checkout');
   if (body.booking_id) return convertBooking(validId(body.booking_id, 'booking_id'));
   body = normalizeSale(body);
   validatePayloadShape(body);
@@ -120,13 +122,19 @@ async function createSale(body) {
       const dbItem = dbItemsById.get(it.item_id);
       const unitPrice = it.unit_price !== undefined ? it.unit_price : dbItem.sale_price;
       const totalPrice = require('../../utils/money').lineTotal(unitPrice, it.qty);
-      return { item_id: it.item_id, qty: it.qty, unit_price: unitPrice, total_price: totalPrice };
+      return { item_id: it.item_id, qty: it.qty, unit_price: unitPrice, total_price: totalPrice,cost_price_minor:require('../../utils/money').minor(dbItem.purchase_price) };
     });
 
     const subTotal = round2(lineItems.reduce((sum, li) => sum + li.total_price, 0));
     const discount = body.discount ? round2(body.discount) : 0;
     const payable = round2(subTotal - discount);
     if (payable < 0) throw new ApiError(422, 'discount cannot exceed sub_total');
+    if(actor?.operationalRole==='manager') {
+      const config=await require('../counter/counter-core').settings(conn,actor.storeId);
+      if(BigInt(require('../../utils/money').minor(discount))*10000n>BigInt(require('../../utils/money').minor(subTotal))*require('../../utils/exact').scaled(config.manager_discount_percent))throw new ApiError(403,'Discount requires owner approval through counter checkout');
+    }
+    const allocated=require('../../utils/exact').allocate(require('../../utils/money').minor(discount),lineItems.map(l=>require('../../utils/money').minor(l.total_price)));
+    lineItems.forEach((line,index)=>{line.discount_minor=allocated[index];});
 
     // Create invoice FIRST so invoiceId exists before we reference it
     const invoiceId = await saleModel.insertInvoiceHeader(conn, {
@@ -206,6 +214,7 @@ async function convertBooking(bookingId) {
     await conn.beginTransaction();
     const [[booking]] = await conn.query('SELECT * FROM bookings WHERE id = ? FOR UPDATE', [bookingId]);
     if (!booking) throw new ApiError(404, 'Booking not found');
+    await require('../../utils/counter-booking').assertLegacyBooking(conn,bookingId);
     const [[link]] = await conn.query('SELECT invoice_id FROM booking_invoice_links WHERE booking_id = ?', [bookingId]);
     if (link) { invoiceId = link.invoice_id; await conn.commit(); }
     else {

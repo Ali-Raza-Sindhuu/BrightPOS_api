@@ -62,8 +62,11 @@ app.use(cors({
   credentials: true,
 }));
 app.use(helmet());
+app.use((req,res,next)=>{req.id=require('node:crypto').randomUUID();res.set('X-Request-ID',req.id);next();});
 app.use(express.json({ limit: "1mb" }));
-app.use(morgan(config.isProduction ? "combined" : "dev"));
+morgan.token('request-id',req=>req.id);
+app.use(morgan(config.isProduction ? (tokens,req,res)=>JSON.stringify({request_id:req.id,method:tokens.method(req,res),path:req.path,status:Number(tokens.status(req,res)),duration_ms:Number(tokens['response-time'](req,res))}) : "dev"));
+app.get('/api/openapi.json',(req,res)=>res.json(require('./modules/counter/api-contract').spec(require('./modules/counter/counter.routes').contract,require('./modules/demo/demo.routes').contract)));
 
 // Used by the deploy checklist and any uptime monitor to confirm the app is
 // up and talking to MySQL without needing credentials.
@@ -85,6 +88,9 @@ app.use((req, res, next) => {
   next();
 });
 app.use("/api/auth", authRoutes);
+app.use('/api/marketing', require('./modules/marketing/marketing.routes'));
+app.use('/api/counter', require('./modules/counter/counter.routes'));
+app.use('/api/demo', require('./modules/demo/demo.routes'));
 app.use("/api/groups", groupRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/access-control", accessControlRoutes);
@@ -114,7 +120,6 @@ app.use('/api/stock-transfers', stockTransferRoute);
 app.use('/api/stock-snapshots', stockSnapshotRoutes);
 app.use('/api/customer-ledger', customerLedgerRoutes);
 app.use('/api/supplier-ledger', supplierLedgerRoutes);
-// app.use('/customer-returns', customerReturnRoutes);
 app.use('/api/expense-heads', expenseHeadRoute);
 app.use('/api/expense-reports', expenseReportRoute);
 app.use('/api/expense-vouchers', expenseVoucherRoute);
@@ -124,13 +129,6 @@ app.use('/api/booking-payments', bookingPaymentRoutes);
 app.use('/api/reorders', reorderRoute);
 app.use('/api/dashboard', dashboard);
 app.use('/api/expiry-tags', expiryTagRoutes);
-// app.use('/companies', companyRoutes);
-// app.use('/departments', departmentRoutes);
-// app.use('/designations', designationRoutes);
-// app.use('/employees', employeeRoutes);
-// app.use('/clients', clientRoutes);
-// app.use('/follow-ups', followUpRoutes);
-// app.use('/notifications', notificationRoutes);
 
 
 app.use(notFound);
