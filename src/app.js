@@ -63,6 +63,7 @@ app.use(cors({
 }));
 app.use(helmet());
 app.use((req,res,next)=>{req.id=require('node:crypto').randomUUID();res.set('X-Request-ID',req.id);next();});
+app.use('/api/workspaces', express.json({ limit: '32mb' }));
 app.use(express.json({ limit: "1mb" }));
 morgan.token('request-id',req=>req.id);
 app.use(morgan(config.isProduction ? (tokens,req,res)=>JSON.stringify({request_id:req.id,method:tokens.method(req,res),path:req.path,status:Number(tokens.status(req,res)),duration_ms:Number(tokens['response-time'](req,res))}) : "dev"));
@@ -89,6 +90,7 @@ app.use((req, res, next) => {
 });
 app.use("/api/auth", authRoutes);
 app.use('/api/marketing', require('./modules/marketing/marketing.routes'));
+app.use('/api/workspaces', require('./modules/workspaces/workspace.routes'));
 app.use('/api/counter', require('./modules/counter/counter.routes'));
 app.use('/api/demo', require('./modules/demo/demo.routes'));
 app.use("/api/groups", groupRoutes);

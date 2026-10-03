@@ -14,7 +14,7 @@ test('SQL parser preserves quoted separators and ignores comments', () => {
 test('baseline is consecutive and contains each expected table once', () => {
   const migrations = loadMigrations();
   const tables = schemaContract(migrations);
-  assert.equal(migrations.length, 147);
+  assert.equal(migrations.length, 150);
   assert.equal(tables.length, 85);
   assert.equal(new Set(tables.map(table => table.name)).size, 85);
   const baseline = schemaContract(migrations.slice(0, 55));
