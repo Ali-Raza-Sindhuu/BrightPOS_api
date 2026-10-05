@@ -16,7 +16,7 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
-
+certs
 # IDE
 .vscode/
 .idea/

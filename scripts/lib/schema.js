@@ -11,10 +11,13 @@ function normalizeDefault(value) {
 function contractMigrations(migrations) {
   const definitions = new Map();
   for (const migration of migrations) {
-    const create = /^CREATE TABLE\s+`?(\w+)`?\s*\(([\s\S]*)\)\s*ENGINE=/i.exec(migration.sql);
+    // CREATE TABLE migrations may rely on database defaults. Preserve explicit
+    // engine/collation requirements, but don't invent a collation requirement
+    // where the migration leaves that choice to the database.
+    const create = /^CREATE TABLE\s+`?(\w+)`?\s*\(([\s\S]*)\)\s*(?:ENGINE=(\w+)(?:\s+DEFAULT\s+CHARSET=(\w+))?(?:\s+COLLATE=(\w+))?)?$/i.exec(migration.sql);
     if (create) {
       if (definitions.has(create[1])) throw new Error(`Repeated table definition: ${create[1]}`);
-      definitions.set(create[1], { filename: migration.filename, parts: splitSql(create[2], ',') });
+      definitions.set(create[1], { filename: migration.filename, parts: splitSql(create[2], ','), engine: create[3] || null, charset: create[4] || null, collation: create[5] || null });
       continue;
     }
     const alter = /^ALTER TABLE\s+`?(\w+)`?\s+([\s\S]+)$/i.exec(migration.sql);
@@ -38,7 +41,7 @@ function contractMigrations(migrations) {
       } else throw new Error(`Unsupported ALTER clause in ${migration.filename}: ${clause}`);
     }
   }
-  return [...definitions].map(([name, table]) => ({ filename: table.filename, sql: `CREATE TABLE ${name} (${table.parts.join(', ')}) ENGINE=InnoDB` }));
+  return [...definitions].map(([name, table]) => ({ filename: table.filename, sql: `CREATE TABLE ${name} (${table.parts.join(', ')}) ENGINE=${table.engine || 'InnoDB'}`, collation: table.collation }));
 }
 
 // Read the CREATE/ALTER definitions as the schema contract so there is no second,
@@ -48,11 +51,16 @@ function schemaContract(migrations = loadMigrations()) {
   for (const migration of contractMigrations(migrations)) {
     const match = /^CREATE TABLE\s+`?(\w+)`?\s*\(([\s\S]*)\)\s*ENGINE=/i.exec(migration.sql);
     if (!match) continue;
-    const table = { name: match[1], columns: [], indexes: [], foreignKeys: [], checks: [] };
+    const table = { name: match[1], collation: migration.collation, columns: [], indexes: [], foreignKeys: [], checks: [] };
     for (const definition of splitSql(match[2], ',')) {
       const fk = /^CONSTRAINT\s+`?(\w+)`?\s+FOREIGN KEY\s*\(([^)]+)\)\s+REFERENCES\s+`?(\w+)`?\s*\(([^)]+)\)\s+ON DELETE\s+(CASCADE|RESTRICT|SET NULL|NO ACTION)(?:\s+ON UPDATE\s+(CASCADE|RESTRICT|SET NULL|NO ACTION))?/i.exec(definition);
       if (fk) {
         table.foreignKeys.push({ name: fk[1], columns: identifiers(fk[2]), parent: fk[3], parentColumns: identifiers(fk[4]), onDelete: fk[5].toUpperCase(), onUpdate: (fk[6] || 'NO ACTION').toUpperCase() });
+        continue;
+      }
+      const unnamedFk = /^FOREIGN KEY\s*\(([^)]+)\)\s+REFERENCES\s+`?(\w+)`?\s*\(([^)]+)\)\s+ON DELETE\s+(CASCADE|RESTRICT|SET NULL|NO ACTION)(?:\s+ON UPDATE\s+(CASCADE|RESTRICT|SET NULL|NO ACTION))?/i.exec(definition);
+      if (unnamedFk) {
+        table.foreignKeys.push({ name: null, columns: identifiers(unnamedFk[1]), parent: unnamedFk[2], parentColumns: identifiers(unnamedFk[3]), onDelete: unnamedFk[4].toUpperCase(), onUpdate: (unnamedFk[5] || 'NO ACTION').toUpperCase() });
         continue;
       }
       const check = /^CONSTRAINT\s+`?(\w+)`?\s+CHECK\s*\((.*)\)$/is.exec(definition);
@@ -102,7 +110,7 @@ async function validateSchema(conn, migrations = loadMigrations()) {
   for (const expected of contract) {
     const actual = tables.find(table => table.TABLE_NAME === expected.name);
     if (!actual) { errors.push(`Missing table ${expected.name}`); continue; }
-    if (actual.ENGINE !== 'InnoDB' || actual.TABLE_COLLATION !== 'utf8mb4_unicode_ci') errors.push(`${expected.name}: engine/collation mismatch`);
+    if (actual.ENGINE !== 'InnoDB' || (expected.collation && actual.TABLE_COLLATION !== expected.collation)) errors.push(`${expected.name}: engine/collation mismatch`);
     const actualColumns = columns.filter(column => column.TABLE_NAME === expected.name);
     if (actualColumns.length !== expected.columns.length) errors.push(`${expected.name}: column count differs (${actualColumns.length}/${expected.columns.length})`);
     for (const column of expected.columns) {
@@ -115,7 +123,7 @@ async function validateSchema(conn, migrations = loadMigrations()) {
       if (values.map(value => value.COLUMN_NAME).join(',') !== index.columns.join(',') || !values.length || (Number(values[0].NON_UNIQUE) === 0) !== index.unique) errors.push(`${expected.name}: missing/changed index ${index.name}`);
     }
     for (const key of expected.foreignKeys) {
-      const values = foreignKeys.filter(value => value.TABLE_NAME === expected.name && value.CONSTRAINT_NAME === key.name);
+      const values = foreignKeys.filter(value => value.TABLE_NAME === expected.name && (!key.name || value.CONSTRAINT_NAME === key.name));
       if (values.map(value => value.COLUMN_NAME).join(',') !== key.columns.join(',') || values.map(value => value.REFERENCED_COLUMN_NAME).join(',') !== key.parentColumns.join(',') || !values.length || values[0].REFERENCED_TABLE_NAME !== key.parent || values[0].DELETE_RULE !== key.onDelete || values[0].UPDATE_RULE !== key.onUpdate) errors.push(`${expected.name}: missing/changed foreign key ${key.name}`);
     }
     for (const check of expected.checks) {

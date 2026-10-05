@@ -15,8 +15,8 @@ test('baseline is consecutive and contains each expected table once', () => {
   const migrations = loadMigrations();
   const tables = schemaContract(migrations);
   assert.equal(migrations.length, 150);
-  assert.equal(tables.length, 85);
-  assert.equal(new Set(tables.map(table => table.name)).size, 85);
+  assert.equal(tables.length, 88);
+  assert.equal(new Set(tables.map(table => table.name)).size, 88);
   const baseline = schemaContract(migrations.slice(0, 55));
   assert.equal(baseline.length, 52);
   assert.equal(baseline.reduce((n, table) => n + table.foreignKeys.length, 0), 68);
